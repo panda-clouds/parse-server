@@ -4,16 +4,15 @@
 
 const httpsRequest = require('./httpsRequest');
 var Parse = require('parse/node').Parse;
-var logger = require('../../logger').default;
 
 // Returns a promise that fulfills iff this user id is valid.
 function validateAuthData(authData, params) {
-  return vkOAuth2Request(params).then(function(response) {
+  return vkOAuth2Request(params).then(function (response) {
     if (response && response.access_token) {
       return request(
         'api.vk.com',
-        'method/users.get?access_token=' + authData.access_token + '&v=5.8'
-      ).then(function(response) {
+        'method/users.get?access_token=' + authData.access_token + '&v=' + params.apiVersion
+      ).then(function (response) {
         if (
           response &&
           response.response &&
@@ -22,22 +21,15 @@ function validateAuthData(authData, params) {
         ) {
           return;
         }
-        throw new Parse.Error(
-          Parse.Error.OBJECT_NOT_FOUND,
-          'Vk auth is invalid for this user.'
-        );
+        throw new Parse.Error(Parse.Error.OBJECT_NOT_FOUND, 'Vk auth is invalid for this user.');
       });
     }
-    logger.error('Vk Auth', 'Vk appIds or appSecret is incorrect.');
-    throw new Parse.Error(
-      Parse.Error.OBJECT_NOT_FOUND,
-      'Vk appIds or appSecret is incorrect.'
-    );
+    throw new Parse.Error(Parse.Error.OBJECT_NOT_FOUND, 'Vk appIds or appSecret is incorrect.');
   });
 }
 
 function vkOAuth2Request(params) {
-  return new Promise(function(resolve) {
+  return new Promise(function (resolve) {
     if (
       !params ||
       !params.appIds ||
@@ -45,24 +37,25 @@ function vkOAuth2Request(params) {
       !params.appSecret ||
       !params.appSecret.length
     ) {
-      logger.error(
-        'Vk Auth',
-        'Vk auth is not configured. Missing appIds or appSecret.'
-      );
       throw new Parse.Error(
         Parse.Error.OBJECT_NOT_FOUND,
         'Vk auth is not configured. Missing appIds or appSecret.'
       );
     }
+    if (!params.apiVersion) {
+      params.apiVersion = '5.124';
+    }
     resolve();
-  }).then(function() {
+  }).then(function () {
     return request(
       'oauth.vk.com',
       'access_token?client_id=' +
         params.appIds +
         '&client_secret=' +
         params.appSecret +
-        '&v=5.59&grant_type=client_credentials'
+        '&v=' +
+        params.apiVersion +
+        '&grant_type=client_credentials'
     );
   });
 }

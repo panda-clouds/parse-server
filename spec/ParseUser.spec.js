@@ -7,11 +7,11 @@
 
 'use strict';
 
-const MongoStorageAdapter = require('../lib/Adapters/Storage/Mongo/MongoStorageAdapter')
-  .default;
+const MongoStorageAdapter = require('../lib/Adapters/Storage/Mongo/MongoStorageAdapter').default;
 const request = require('../lib/request');
 const passwordCrypto = require('../lib/password');
 const Config = require('../lib/Config');
+const cryptoUtils = require('../lib/cryptoUtils');
 
 function verifyACL(user) {
   const ACL = user.getACL();
@@ -86,9 +86,7 @@ describe('Parse.User testing', () => {
       })
       .catch(err => {
         expect(err.status).toBe(404);
-        expect(err.text).toMatch(
-          '{"code":101,"error":"Invalid username/password."}'
-        );
+        expect(err.text).toMatch('{"code":101,"error":"Invalid username/password."}');
         done();
       });
   });
@@ -115,9 +113,7 @@ describe('Parse.User testing', () => {
       })
       .catch(err => {
         expect(err.status).toBe(404);
-        expect(err.text).toMatch(
-          '{"code":101,"error":"Invalid username/password."}'
-        );
+        expect(err.text).toMatch('{"code":101,"error":"Invalid username/password."}');
         done();
       });
   });
@@ -242,8 +238,8 @@ describe('Parse.User testing', () => {
   });
 
   it_only_db('mongo')('should let legacy users without ACL login', async () => {
-    const databaseURI =
-      'mongodb://localhost:27017/parseServerMongoAdapterTestDatabase';
+    await reconfigureServer();
+    const databaseURI = 'mongodb://localhost:27017/parseServerMongoAdapterTestDatabase';
     const adapter = new MongoStorageAdapter({
       collectionPrefix: 'test_',
       uri: databaseURI,
@@ -251,6 +247,7 @@ describe('Parse.User testing', () => {
     await adapter.connect();
     await adapter.database.dropDatabase();
     delete adapter.connectionPromise;
+    Config.get(Parse.applicationId).schemaCache.clear();
 
     const user = new Parse.User();
     await user.signUp({
@@ -261,8 +258,7 @@ describe('Parse.User testing', () => {
     const collection = await adapter._adaptiveCollection('_User');
     await collection.insertOne({
       // the hashed password is 'password' hashed
-      _hashed_password:
-        '$2b$10$mJ2ca2UbCM9hlojYHZxkQe8pyEXe5YMg0nMdvP4AJBeqlTEZJ6/Uu',
+      _hashed_password: '$2b$10$mJ2ca2UbCM9hlojYHZxkQe8pyEXe5YMg0nMdvP4AJBeqlTEZJ6/Uu',
       _session_token: 'xxx',
       email: 'xxx@a.b',
       username: 'oldUser',
@@ -383,10 +379,10 @@ describe('Parse.User testing', () => {
     let sessionToken = null;
 
     Promise.resolve()
-      .then(function() {
+      .then(function () {
         return Parse.User.signUp('Jason', 'Parse', { code: 'red' });
       })
-      .then(function(newUser) {
+      .then(function (newUser) {
         equal(Parse.User.current(), newUser);
 
         user = newUser;
@@ -400,7 +396,7 @@ describe('Parse.User testing', () => {
 
         return Parse.User.become(sessionToken);
       })
-      .then(function(newUser) {
+      .then(function (newUser) {
         equal(Parse.User.current(), newUser);
 
         ok(newUser);
@@ -416,24 +412,21 @@ describe('Parse.User testing', () => {
         return Parse.User.become('somegarbage');
       })
       .then(
-        function() {
+        function () {
           // This should have failed actually.
-          ok(
-            false,
-            "Shouldn't have been able to log in with garbage session token."
-          );
+          ok(false, "Shouldn't have been able to log in with garbage session token.");
         },
-        function(error) {
+        function (error) {
           ok(error);
           // Handle the error.
           return Promise.resolve();
         }
       )
       .then(
-        function() {
+        function () {
           done();
         },
-        function(error) {
+        function (error) {
           ok(false, error);
           done();
         }
@@ -575,10 +568,7 @@ describe('Parse.User testing', () => {
     await user.save({ ACL: acl }, { useMasterKey: true });
 
     // Try to update from admin... should all work fine
-    await user.save(
-      { key: 'fromAdmin' },
-      { sessionToken: admin.getSessionToken() }
-    );
+    await user.save({ key: 'fromAdmin' }, { sessionToken: admin.getSessionToken() });
     await user.fetch();
     expect(user.toJSON().key).toEqual('fromAdmin');
 
@@ -732,11 +722,11 @@ describe('Parse.User testing', () => {
   function signUpAll(list, optionsOrCallback) {
     let promise = Promise.resolve();
     list.forEach(user => {
-      promise = promise.then(function() {
+      promise = promise.then(function () {
         return user.signUp();
       });
     });
-    promise = promise.then(function() {
+    promise = promise.then(function () {
       return list;
     });
     return promise.then(optionsOrCallback);
@@ -747,7 +737,7 @@ describe('Parse.User testing', () => {
     const MESSAGES = 5;
 
     // Make a list of users.
-    const userList = range(USERS).map(function(i) {
+    const userList = range(USERS).map(function (i) {
       const user = new Parse.User();
       user.set('password', 'user_num_' + i);
       user.set('email', 'user_num_' + i + '@example.com');
@@ -755,14 +745,14 @@ describe('Parse.User testing', () => {
       return user;
     });
 
-    signUpAll(userList, async function(users) {
+    signUpAll(userList, async function (users) {
       // Make a list of messages.
       if (!users || users.length != USERS) {
         fail('signupAll failed');
         done();
         return;
       }
-      const messageList = range(MESSAGES).map(function(i) {
+      const messageList = range(MESSAGES).map(function (i) {
         const message = new TestObject();
         message.set('to', users[(i + 1) % USERS]);
         message.set('from', users[i % USERS]);
@@ -838,12 +828,13 @@ describe('Parse.User testing', () => {
     done();
   });
 
-  it('user modified while saving', done => {
+  it('user modified while saving', async done => {
     Parse.Object.disableSingleInstance();
+    await reconfigureServer();
     const user = new Parse.User();
     user.set('username', 'alice');
     user.set('password', 'password');
-    user.signUp().then(function(userAgain) {
+    user.signUp().then(function (userAgain) {
       equal(userAgain.get('username'), 'bob');
       ok(userAgain.dirty('username'));
       const query = new Parse.Query(Parse.User);
@@ -895,11 +886,7 @@ describe('Parse.User testing', () => {
     equal(aliceAgain.get('username'), 'alice');
     equal(aliceAgain.id, alice.id, 'currentUser should have objectId');
     ok(aliceAgain.getSessionToken(), 'currentUser should have a sessionToken');
-    equal(
-      alice.get('password'),
-      undefined,
-      'currentUser should not have password'
-    );
+    equal(alice.get('password'), undefined, 'currentUser should not have password');
     done();
   });
 
@@ -919,16 +906,9 @@ describe('Parse.User testing', () => {
         delete Parse.User._currentUserMatchesDisk;
 
         const userFromDisk = Parse.User.current();
-        equal(
-          userFromDisk.get('password'),
-          undefined,
-          'password should not be in attributes'
-        );
+        equal(userFromDisk.get('password'), undefined, 'password should not be in attributes');
         equal(userFromDisk.id, id, 'id should be set');
-        ok(
-          userFromDisk.getSessionToken(),
-          'currentUser should have a sessionToken'
-        );
+        ok(userFromDisk.getSessionToken(), 'currentUser should have a sessionToken');
         done();
       });
   });
@@ -937,14 +917,14 @@ describe('Parse.User testing', () => {
     let id;
 
     Parse.User.signUp('alice', 'password', null)
-      .then(function(alice) {
+      .then(function (alice) {
         id = alice.id;
         return Parse.User.logOut();
       })
       .then(() => {
         return Parse.User.logIn('alice', 'password');
       })
-      .then(function() {
+      .then(function () {
         // Simulate browser refresh by force-reloading user from localStorage
         Parse.User._clearCache();
 
@@ -952,7 +932,7 @@ describe('Parse.User testing', () => {
         return Parse.User.current().save({ some_field: 1 });
       })
       .then(
-        function() {
+        function () {
           // Check the user in memory just after save operation
           const userInMemory = Parse.User.current();
 
@@ -962,11 +942,7 @@ describe('Parse.User testing', () => {
             'saving user should not remove existing fields'
           );
 
-          equal(
-            userInMemory.get('some_field'),
-            1,
-            'saving user should save specified field'
-          );
+          equal(userInMemory.get('some_field'), 1, 'saving user should save specified field');
 
           equal(
             userInMemory.get('password'),
@@ -992,10 +968,7 @@ describe('Parse.User testing', () => {
 
           ok(userInMemory.createdAt instanceof Date);
 
-          ok(
-            userInMemory.getSessionToken(),
-            'user should have a sessionToken after saving'
-          );
+          ok(userInMemory.getSessionToken(), 'user should have a sessionToken after saving');
 
           // Force the current user to read from localStorage, and check again
           delete Parse.User._currentUser;
@@ -1008,11 +981,7 @@ describe('Parse.User testing', () => {
             'userFromDisk should have previously existing fields'
           );
 
-          equal(
-            userFromDisk.get('some_field'),
-            1,
-            'userFromDisk should have saved field'
-          );
+          equal(userFromDisk.get('some_field'), 1, 'userFromDisk should have saved field');
 
           equal(
             userFromDisk.get('password'),
@@ -1038,14 +1007,11 @@ describe('Parse.User testing', () => {
 
           ok(userFromDisk.createdAt instanceof Date);
 
-          ok(
-            userFromDisk.getSessionToken(),
-            'userFromDisk should have a sessionToken'
-          );
+          ok(userFromDisk.getSessionToken(), 'userFromDisk should have a sessionToken');
 
           done();
         },
-        function(error) {
+        function (error) {
           ok(false, error);
           done();
         }
@@ -1088,7 +1054,7 @@ describe('Parse.User testing', () => {
 
   it('user signup class method uses subclassing', async done => {
     const SuperUser = Parse.User.extend({
-      secret: function() {
+      secret: function () {
         return 1337;
       },
     });
@@ -1101,7 +1067,7 @@ describe('Parse.User testing', () => {
 
   it('user on disk gets updated after save', async done => {
     Parse.User.extend({
-      isSuper: function() {
+      isSuper: function () {
         return true;
       },
     });
@@ -1129,7 +1095,7 @@ describe('Parse.User testing', () => {
     done();
   });
 
-  const getMockFacebookProviderWithIdToken = function(id, token) {
+  const getMockFacebookProviderWithIdToken = function (id, token) {
     return {
       authData: {
         id: id,
@@ -1142,7 +1108,7 @@ describe('Parse.User testing', () => {
       synchronizedAuthToken: null,
       synchronizedExpiration: null,
 
-      authenticate: function(options) {
+      authenticate: function (options) {
         if (this.shouldError) {
           options.error(this, 'An error occurred');
         } else if (this.shouldCancel) {
@@ -1151,7 +1117,7 @@ describe('Parse.User testing', () => {
           options.success(this, this.authData);
         }
       },
-      restoreAuthentication: function(authData) {
+      restoreAuthentication: function (authData) {
         if (!authData) {
           this.synchronizedUserId = null;
           this.synchronizedAuthToken = null;
@@ -1163,10 +1129,10 @@ describe('Parse.User testing', () => {
         this.synchronizedExpiration = authData.expiration_date;
         return true;
       },
-      getAuthType: function() {
+      getAuthType: function () {
         return 'facebook';
       },
-      deauthenticate: function() {
+      deauthenticate: function () {
         this.loggedOut = true;
         this.restoreAuthentication(null);
       },
@@ -1175,11 +1141,11 @@ describe('Parse.User testing', () => {
 
   // Note that this mocks out client-side Facebook action rather than
   // server-side.
-  const getMockFacebookProvider = function() {
+  const getMockFacebookProvider = function () {
     return getMockFacebookProviderWithIdToken('8675309', 'jenny');
   };
 
-  const getMockMyOauthProvider = function() {
+  const getMockMyOauthProvider = function () {
     return {
       authData: {
         id: '12345',
@@ -1192,7 +1158,7 @@ describe('Parse.User testing', () => {
       synchronizedAuthToken: null,
       synchronizedExpiration: null,
 
-      authenticate: function(options) {
+      authenticate: function (options) {
         if (this.shouldError) {
           options.error(this, 'An error occurred');
         } else if (this.shouldCancel) {
@@ -1201,7 +1167,7 @@ describe('Parse.User testing', () => {
           options.success(this, this.authData);
         }
       },
-      restoreAuthentication: function(authData) {
+      restoreAuthentication: function (authData) {
         if (!authData) {
           this.synchronizedUserId = null;
           this.synchronizedAuthToken = null;
@@ -1213,10 +1179,10 @@ describe('Parse.User testing', () => {
         this.synchronizedExpiration = authData.expiration_date;
         return true;
       },
-      getAuthType: function() {
+      getAuthType: function () {
         return 'myoauth';
       },
-      deauthenticate: function() {
+      deauthenticate: function () {
         this.loggedOut = true;
         this.restoreAuthentication(null);
       },
@@ -1224,7 +1190,7 @@ describe('Parse.User testing', () => {
   };
 
   Parse.User.extend({
-    extended: function() {
+    extended: function () {
       return true;
     },
   });
@@ -1238,12 +1204,35 @@ describe('Parse.User testing', () => {
     ok(model.extended(), 'Should have used subclass.');
     strictEqual(provider.authData.id, provider.synchronizedUserId);
     strictEqual(provider.authData.access_token, provider.synchronizedAuthToken);
-    strictEqual(
-      provider.authData.expiration_date,
-      provider.synchronizedExpiration
-    );
+    strictEqual(provider.authData.expiration_date, provider.synchronizedExpiration);
     ok(model._isLinked('facebook'), 'User should be linked to facebook');
     done();
+  });
+
+  it('can not set authdata to null', async () => {
+    try {
+      const provider = getMockFacebookProvider();
+      Parse.User._registerAuthenticationProvider(provider);
+      const user = await Parse.User._logInWith('facebook');
+      user.set('authData', null);
+      await user.save();
+      fail();
+    } catch (e) {
+      expect(e.message).toBe('This authentication method is unsupported.');
+    }
+  });
+
+  it('ignore setting authdata to undefined', async () => {
+    const provider = getMockFacebookProvider();
+    Parse.User._registerAuthenticationProvider(provider);
+    const user = await Parse.User._logInWith('facebook');
+    user.set('authData', undefined);
+    await user.save();
+    let authData = user.get('authData');
+    expect(authData).toBe(undefined);
+    await user.fetch();
+    authData = user.get('authData');
+    expect(authData.facebook.id).toBeDefined();
   });
 
   it('user authData should be available in cloudcode (#2342)', async done => {
@@ -1261,10 +1250,7 @@ describe('Parse.User testing', () => {
     ok(model.extended(), 'Should have used subclass.');
     strictEqual(provider.authData.id, provider.synchronizedUserId);
     strictEqual(provider.authData.access_token, provider.synchronizedAuthToken);
-    strictEqual(
-      provider.authData.expiration_date,
-      provider.synchronizedExpiration
-    );
+    strictEqual(provider.authData.expiration_date, provider.synchronizedExpiration);
     ok(model._isLinked('facebook'), 'User should be linked to facebook');
 
     Parse.Cloud.run('checkLogin').then(done, done);
@@ -1272,10 +1258,7 @@ describe('Parse.User testing', () => {
 
   it('log in with provider and update token', async done => {
     const provider = getMockFacebookProvider();
-    const secondProvider = getMockFacebookProviderWithIdToken(
-      '8675309',
-      'jenny_valid_token'
-    );
+    const secondProvider = getMockFacebookProviderWithIdToken('8675309', 'jenny_valid_token');
     Parse.User._registerAuthenticationProvider(provider);
     await Parse.User._logInWith('facebook');
     Parse.User._registerAuthenticationProvider(secondProvider);
@@ -1357,10 +1340,7 @@ describe('Parse.User testing', () => {
     ok(model.extended(), 'Should have used the subclass.');
     strictEqual(provider.authData.id, provider.synchronizedUserId);
     strictEqual(provider.authData.access_token, provider.synchronizedAuthToken);
-    strictEqual(
-      provider.authData.expiration_date,
-      provider.synchronizedExpiration
-    );
+    strictEqual(provider.authData.expiration_date, provider.synchronizedExpiration);
     ok(model._isLinked('facebook'), 'User should be linked to facebook');
 
     Parse.User.logOut().then(async () => {
@@ -1368,10 +1348,7 @@ describe('Parse.User testing', () => {
       provider.loggedOut = false;
       const innerModel = await Parse.User._logInWith('facebook');
       ok(innerModel instanceof Parse.User, 'Model should be a Parse.User');
-      ok(
-        innerModel === Parse.User.current(),
-        'Returned model should be the current user'
-      );
+      ok(innerModel === Parse.User.current(), 'Returned model should be the current user');
       ok(provider.authData.id === provider.synchronizedUserId);
       ok(provider.authData.access_token === provider.synchronizedAuthToken);
       ok(innerModel._isLinked('facebook'), 'User should be linked to facebook');
@@ -1411,7 +1388,7 @@ describe('Parse.User testing', () => {
     Parse.User._registerAuthenticationProvider(provider);
     await Parse.User._logInWith('facebook');
     Parse.User.logOut().then(async () => {
-      Parse.Cloud.beforeSave(Parse.User, function(req, res) {
+      Parse.Cloud.beforeSave(Parse.User, function (req, res) {
         res.error("Before save shouldn't be called on login");
       });
       await Parse.User._logInWith('facebook');
@@ -1497,6 +1474,54 @@ describe('Parse.User testing', () => {
     done();
   });
 
+  it('login with provider should be blockable by beforeLogin even when the user has a attached file', async done => {
+    const provider = getMockFacebookProvider();
+    Parse.User._registerAuthenticationProvider(provider);
+
+    let hit = 0;
+    Parse.Cloud.beforeLogin(req => {
+      hit++;
+      if (req.object.get('isBanned')) {
+        throw new Error('banned account');
+      }
+    });
+
+    const user = await Parse.User._logInWith('facebook');
+    const base64 = 'aHR0cHM6Ly9naXRodWIuY29tL2t2bmt1YW5n';
+    const file = new Parse.File('myfile.txt', { base64 });
+    await file.save();
+    await user.save({ isBanned: true, file });
+    await Parse.User.logOut();
+
+    try {
+      await Parse.User._logInWith('facebook');
+      throw new Error('should not have continued login.');
+    } catch (e) {
+      expect(e.message).toBe('banned account');
+    }
+
+    expect(hit).toBe(1);
+    done();
+  });
+
+  it('logout with provider should call afterLogout trigger', async done => {
+    const provider = getMockFacebookProvider();
+    Parse.User._registerAuthenticationProvider(provider);
+
+    let userId;
+    Parse.Cloud.afterLogout(req => {
+      expect(req.object.className).toEqual('_Session');
+      expect(req.object.id).toBeDefined();
+      const user = req.object.get('user');
+      expect(user).toBeDefined();
+      userId = user.id;
+    });
+    const user = await Parse.User._logInWith('facebook');
+    await Parse.User.logOut();
+    expect(user.id).toBe(userId);
+    done();
+  });
+
   it('link with provider', async done => {
     const provider = getMockFacebookProvider();
     Parse.User._registerAuthenticationProvider(provider);
@@ -1509,10 +1534,7 @@ describe('Parse.User testing', () => {
     strictEqual(Parse.User.current(), model);
     strictEqual(provider.authData.id, provider.synchronizedUserId);
     strictEqual(provider.authData.access_token, provider.synchronizedAuthToken);
-    strictEqual(
-      provider.authData.expiration_date,
-      provider.synchronizedExpiration
-    );
+    strictEqual(provider.authData.expiration_date, provider.synchronizedExpiration);
     ok(model._isLinked('facebook'), 'User should be linked');
     done();
   });
@@ -1531,10 +1553,7 @@ describe('Parse.User testing', () => {
     strictEqual(Parse.User.current(), model);
     strictEqual(provider.authData.id, provider.synchronizedUserId);
     strictEqual(provider.authData.access_token, provider.synchronizedAuthToken);
-    strictEqual(
-      provider.authData.expiration_date,
-      provider.synchronizedExpiration
-    );
+    strictEqual(provider.authData.expiration_date, provider.synchronizedExpiration);
     ok(model._isLinked('facebook'), 'User should be linked.');
     const user2 = new Parse.User();
     user2.set('username', 'testLinkWithProviderToAlreadyLinkedUser2');
@@ -1629,10 +1648,7 @@ describe('Parse.User testing', () => {
     ok(model.extended(), 'Should have used the subclass.');
     strictEqual(provider.authData.id, provider.synchronizedUserId);
     strictEqual(provider.authData.access_token, provider.synchronizedAuthToken);
-    strictEqual(
-      provider.authData.expiration_date,
-      provider.synchronizedExpiration
-    );
+    strictEqual(provider.authData.expiration_date, provider.synchronizedExpiration);
     ok(model._isLinked('facebook'), 'User should be linked to facebook.');
     await model._unlinkFrom('facebook');
     ok(!model._isLinked('facebook'), 'User should not be linked.');
@@ -1651,10 +1667,7 @@ describe('Parse.User testing', () => {
     ok(model.extended(), 'Should have used the subclass.');
     strictEqual(provider.authData.id, provider.synchronizedUserId);
     strictEqual(provider.authData.access_token, provider.synchronizedAuthToken);
-    strictEqual(
-      provider.authData.expiration_date,
-      provider.synchronizedExpiration
-    );
+    strictEqual(provider.authData.expiration_date, provider.synchronizedExpiration);
     ok(model._isLinked('facebook'), 'User should be linked to facebook');
 
     await model._unlinkFrom('facebook');
@@ -1681,10 +1694,7 @@ describe('Parse.User testing', () => {
     ok(model.extended(), 'Should have used the subclass.');
     strictEqual(provider.authData.id, provider.synchronizedUserId);
     strictEqual(provider.authData.access_token, provider.synchronizedAuthToken);
-    strictEqual(
-      provider.authData.expiration_date,
-      provider.synchronizedExpiration
-    );
+    strictEqual(provider.authData.expiration_date, provider.synchronizedExpiration);
     ok(model._isLinked('facebook'), 'User should be linked to facebook');
     Parse.User._registerAuthenticationProvider(mockProvider);
     const objectId = model.id;
@@ -1697,10 +1707,7 @@ describe('Parse.User testing', () => {
 
   it('link multiple providers and updates token', async done => {
     const provider = getMockFacebookProvider();
-    const secondProvider = getMockFacebookProviderWithIdToken(
-      '8675309',
-      'jenny_valid_token'
-    );
+    const secondProvider = getMockFacebookProviderWithIdToken('8675309', 'jenny_valid_token');
 
     const mockProvider = getMockMyOauthProvider();
     Parse.User._registerAuthenticationProvider(provider);
@@ -1727,10 +1734,7 @@ describe('Parse.User testing', () => {
     ok(model.extended(), 'Should have used the subclass.');
     strictEqual(provider.authData.id, provider.synchronizedUserId);
     strictEqual(provider.authData.access_token, provider.synchronizedAuthToken);
-    strictEqual(
-      provider.authData.expiration_date,
-      provider.synchronizedExpiration
-    );
+    strictEqual(provider.authData.expiration_date, provider.synchronizedExpiration);
     ok(model._isLinked('facebook'), 'User should be linked to facebook');
     Parse.User._registerAuthenticationProvider(mockProvider);
     const objectId = model.id;
@@ -1782,9 +1786,7 @@ describe('Parse.User testing', () => {
         // make sure the location header is properly set
         expect(userId).not.toBeUndefined();
         expect(body.objectId).toEqual(userId);
-        expect(response.headers.location).toEqual(
-          Parse.serverURL + '/users/' + userId
-        );
+        expect(response.headers.location).toEqual(Parse.serverURL + '/users/' + userId);
         done();
       });
     });
@@ -1796,16 +1798,16 @@ describe('Parse.User testing', () => {
         id: '12345',
         access_token: 'token',
       },
-      restoreAuthentication: function() {
+      restoreAuthentication: function () {
         return true;
       },
-      deauthenticate: function() {
+      deauthenticate: function () {
         provider.authData = {};
       },
-      authenticate: function(options) {
+      authenticate: function (options) {
         options.success(this, provider.authData);
       },
-      getAuthType: function() {
+      getAuthType: function () {
         return 'shortLivedAuth';
       },
     };
@@ -1816,9 +1818,7 @@ describe('Parse.User testing', () => {
         // Simulate a remotely expired token (like a short lived one)
         // In this case, we want success as it was valid once.
         // If the client needs an updated one, do lock the user out
-        defaultConfiguration.auth.shortLivedAuth.setValidAccessToken(
-          'otherToken'
-        );
+        defaultConfiguration.auth.shortLivedAuth.setValidAccessToken('otherToken');
         return Parse.User._logInWith('shortLivedAuth', {});
       })
       .then(
@@ -1837,16 +1837,16 @@ describe('Parse.User testing', () => {
         id: '12345',
         access_token: 'token',
       },
-      restoreAuthentication: function() {
+      restoreAuthentication: function () {
         return true;
       },
-      deauthenticate: function() {
+      deauthenticate: function () {
         provider.authData = {};
       },
-      authenticate: function(options) {
+      authenticate: function (options) {
         options.success(this, provider.authData);
       },
-      getAuthType: function() {
+      getAuthType: function () {
         return 'shortLivedAuth';
       },
     };
@@ -1857,9 +1857,7 @@ describe('Parse.User testing', () => {
         // Simulate a remotely expired token (like a short lived one)
         // In this case, we want success as it was valid once.
         // If the client needs an updated one, do lock the user out
-        defaultConfiguration.auth.shortLivedAuth.setValidAccessToken(
-          'otherToken'
-        );
+        defaultConfiguration.auth.shortLivedAuth.setValidAccessToken('otherToken');
         return request({
           method: 'PUT',
           url: Parse.serverURL + '/users/' + Parse.User.current().id,
@@ -1993,10 +1991,10 @@ describe('Parse.User testing', () => {
       access_token: 'jenny',
       expiration_date: new Date().toJSON(),
     }).then(
-      function() {
+      function () {
         done();
       },
-      function(error) {
+      function (error) {
         ok(false, error);
         done();
       }
@@ -2022,10 +2020,10 @@ describe('Parse.User testing', () => {
       access_token: 'jenny',
       expiration_date: new Date().toJSON(),
     }).then(
-      function() {
+      function () {
         done();
       },
-      function(error) {
+      function (error) {
         ok(false, error);
         done();
       }
@@ -2036,27 +2034,27 @@ describe('Parse.User testing', () => {
     const data = { foo: 'bar' };
 
     Parse.User.signUp('finn', 'human', data)
-      .then(function(user) {
+      .then(function (user) {
         equal(Parse.User.current(), user);
         equal(user.get('foo'), 'bar');
         return Parse.User.logOut();
       })
-      .then(function() {
+      .then(function () {
         return Parse.User.logIn('finn', 'human');
       })
-      .then(function(user) {
+      .then(function (user) {
         equal(user, Parse.User.current());
         equal(user.get('foo'), 'bar');
         return Parse.User.logOut();
       })
-      .then(function() {
+      .then(function () {
         const user = new Parse.User();
         user.set('username', 'jake');
         user.set('password', 'dog');
         user.set('foo', 'baz');
         return user.signUp();
       })
-      .then(function(user) {
+      .then(function (user) {
         equal(user, Parse.User.current());
         equal(user.get('foo'), 'baz');
         user = new Parse.User();
@@ -2064,14 +2062,14 @@ describe('Parse.User testing', () => {
         user.set('password', 'dog');
         return user.logIn();
       })
-      .then(function(user) {
+      .then(function (user) {
         equal(user, Parse.User.current());
         equal(user.get('foo'), 'baz');
         const userAgain = new Parse.User();
         userAgain.id = user.id;
         return userAgain.fetch();
       })
-      .then(function(userAgain) {
+      .then(function (userAgain) {
         equal(userAgain.get('foo'), 'baz');
         done();
       });
@@ -2079,7 +2077,7 @@ describe('Parse.User testing', () => {
 
   it("querying for users doesn't get session tokens", done => {
     Parse.User.signUp('finn', 'human', { foo: 'bar' })
-      .then(function() {
+      .then(function () {
         return Parse.User.logOut();
       })
       .then(() => {
@@ -2089,7 +2087,7 @@ describe('Parse.User testing', () => {
         user.set('foo', 'baz');
         return user.signUp();
       })
-      .then(function() {
+      .then(function () {
         return Parse.User.logOut();
       })
       .then(() => {
@@ -2097,18 +2095,15 @@ describe('Parse.User testing', () => {
         return query.find({ sessionToken: null });
       })
       .then(
-        function(users) {
+        function (users) {
           equal(users.length, 2);
           users.forEach(user => {
             expect(user.getSessionToken()).toBeUndefined();
-            ok(
-              !user.getSessionToken(),
-              'user should not have a session token.'
-            );
+            ok(!user.getSessionToken(), 'user should not have a session token.');
           });
           done();
         },
-        function(error) {
+        function (error) {
           ok(false, error);
           done();
         }
@@ -2139,19 +2134,19 @@ describe('Parse.User testing', () => {
     user.setUsername('zxcv');
     let currentSessionToken = '';
     Promise.resolve()
-      .then(function() {
+      .then(function () {
         return user.signUp();
       })
-      .then(function() {
+      .then(function () {
         currentSessionToken = user.getSessionToken();
         return user.fetch();
       })
       .then(
-        function(u) {
+        function (u) {
           expect(currentSessionToken).toEqual(u.getSessionToken());
           done();
         },
-        function(error) {
+        function (error) {
           ok(false, error);
           done();
         }
@@ -2198,6 +2193,114 @@ describe('Parse.User testing', () => {
           done();
         }
       );
+  });
+
+  describe('case insensitive signup not allowed', () => {
+    it('signup should fail with duplicate case insensitive username with basic setter', async () => {
+      const user = new Parse.User();
+      user.set('username', 'test1');
+      user.set('password', 'test');
+      await user.signUp();
+
+      const user2 = new Parse.User();
+      user2.set('username', 'Test1');
+      user2.set('password', 'test');
+      await expectAsync(user2.signUp()).toBeRejectedWith(
+        new Parse.Error(Parse.Error.USERNAME_TAKEN, 'Account already exists for this username.')
+      );
+    });
+
+    it('signup should fail with duplicate case insensitive username with field specific setter', async () => {
+      const user = new Parse.User();
+      user.setUsername('test1');
+      user.setPassword('test');
+      await user.signUp();
+
+      const user2 = new Parse.User();
+      user2.setUsername('Test1');
+      user2.setPassword('test');
+      await expectAsync(user2.signUp()).toBeRejectedWith(
+        new Parse.Error(Parse.Error.USERNAME_TAKEN, 'Account already exists for this username.')
+      );
+    });
+
+    it('signup should fail with duplicate case insensitive email', async () => {
+      const user = new Parse.User();
+      user.setUsername('test1');
+      user.setPassword('test');
+      user.setEmail('test@example.com');
+      await user.signUp();
+
+      const user2 = new Parse.User();
+      user2.setUsername('test2');
+      user2.setPassword('test');
+      user2.setEmail('Test@Example.Com');
+      await expectAsync(user2.signUp()).toBeRejectedWith(
+        new Parse.Error(Parse.Error.EMAIL_TAKEN, 'Account already exists for this email address.')
+      );
+    });
+
+    it('edit should fail with duplicate case insensitive email', async () => {
+      const user = new Parse.User();
+      user.setUsername('test1');
+      user.setPassword('test');
+      user.setEmail('test@example.com');
+      await user.signUp();
+
+      const user2 = new Parse.User();
+      user2.setUsername('test2');
+      user2.setPassword('test');
+      user2.setEmail('Foo@Example.Com');
+      await user2.signUp();
+
+      user2.setEmail('Test@Example.Com');
+      await expectAsync(user2.save()).toBeRejectedWith(
+        new Parse.Error(Parse.Error.EMAIL_TAKEN, 'Account already exists for this email address.')
+      );
+    });
+
+    describe('anonymous users', () => {
+      beforeEach(() => {
+        const insensitiveCollisions = [
+          'abcdefghijklmnop',
+          'Abcdefghijklmnop',
+          'ABcdefghijklmnop',
+          'ABCdefghijklmnop',
+          'ABCDefghijklmnop',
+          'ABCDEfghijklmnop',
+          'ABCDEFghijklmnop',
+          'ABCDEFGhijklmnop',
+          'ABCDEFGHijklmnop',
+          'ABCDEFGHIjklmnop',
+          'ABCDEFGHIJklmnop',
+          'ABCDEFGHIJKlmnop',
+          'ABCDEFGHIJKLmnop',
+          'ABCDEFGHIJKLMnop',
+          'ABCDEFGHIJKLMnop',
+          'ABCDEFGHIJKLMNop',
+          'ABCDEFGHIJKLMNOp',
+          'ABCDEFGHIJKLMNOP',
+        ];
+
+        // need a bunch of spare random strings per api request
+        spyOn(cryptoUtils, 'randomString').and.returnValues(...insensitiveCollisions);
+      });
+
+      it('should not fail on case insensitive matches', async () => {
+        const user1 = await Parse.AnonymousUtils.logIn();
+        const username1 = user1.get('username');
+
+        const user2 = await Parse.AnonymousUtils.logIn();
+        const username2 = user2.get('username');
+
+        expect(username1).not.toBeUndefined();
+        expect(username2).not.toBeUndefined();
+        expect(username1.toLowerCase()).toBe('abcdefghijklmnop');
+        expect(username2.toLowerCase()).toBe('abcdefghijklmnop');
+        expect(username2).not.toBe(username1);
+        expect(username2.toLowerCase()).toBe(username1.toLowerCase()); // this is redundant :).
+      });
+    });
   });
 
   it('user cannot update email to existing user', done => {
@@ -2524,8 +2627,7 @@ describe('Parse.User testing', () => {
   });
 
   it('password format matches hosted parse', done => {
-    const hashed =
-      '$2a$10$8/wZJyEuiEaobBBqzTG.jeY.XSFJd0rzaN//ososvEI4yLqI.4aie';
+    const hashed = '$2a$10$8/wZJyEuiEaobBBqzTG.jeY.XSFJd0rzaN//ososvEI4yLqI.4aie';
     passwordCrypto.compare('test', hashed).then(
       pass => {
         expect(pass).toBe(true);
@@ -2542,25 +2644,25 @@ describe('Parse.User testing', () => {
     let sessionToken = null;
 
     Promise.resolve()
-      .then(function() {
+      .then(function () {
         return Parse.User.signUp('fosco', 'parse');
       })
-      .then(function(newUser) {
+      .then(function (newUser) {
         equal(Parse.User.current(), newUser);
         sessionToken = newUser.getSessionToken();
         ok(sessionToken);
         newUser.set('password', 'facebook');
         return newUser.save();
       })
-      .then(function() {
+      .then(function () {
         return Parse.User.become(sessionToken);
       })
       .then(
-        function() {
+        function () {
           fail('Session should have been invalidated');
           done();
         },
-        function(err) {
+        function (err) {
           expect(err.code).toBe(Parse.Error.INVALID_SESSION_TOKEN);
           expect(err.message).toBe('Invalid session token');
           done();
@@ -2571,25 +2673,25 @@ describe('Parse.User testing', () => {
   it('test parse user become', done => {
     let sessionToken = null;
     Promise.resolve()
-      .then(function() {
+      .then(function () {
         return Parse.User.signUp('flessard', 'folo', { foo: 1 });
       })
-      .then(function(newUser) {
+      .then(function (newUser) {
         equal(Parse.User.current(), newUser);
         sessionToken = newUser.getSessionToken();
         ok(sessionToken);
         newUser.set('foo', 2);
         return newUser.save();
       })
-      .then(function() {
+      .then(function () {
         return Parse.User.become(sessionToken);
       })
       .then(
-        function(newUser) {
+        function (newUser) {
           equal(newUser.get('foo'), 2);
           done();
         },
-        function() {
+        function () {
           fail('The session should still be valid');
           done();
         }
@@ -2601,7 +2703,7 @@ describe('Parse.User testing', () => {
     let sessionToken = null;
 
     Promise.resolve()
-      .then(function() {
+      .then(function () {
         return Parse.User.signUp('log', 'out');
       })
       .then(newUser => {
@@ -2679,8 +2781,7 @@ describe('Parse.User testing', () => {
           '_User',
           {
             username: 'user',
-            _hashed_password:
-              '$2a$10$8/wZJyEuiEaobBBqzTG.jeY.XSFJd0rzaN//ososvEI4yLqI.4aie',
+            _hashed_password: '$2a$10$8/wZJyEuiEaobBBqzTG.jeY.XSFJd0rzaN//ososvEI4yLqI.4aie',
             _auth_data_facebook: null,
           },
           {}
@@ -2714,8 +2815,7 @@ describe('Parse.User testing', () => {
         '_User',
         {
           username: 'user',
-          _hashed_password:
-            '$2a$10$8/wZJyEuiEaobBBqzTG.jeY.XSFJd0rzaN//ososvEI4yLqI.4aie',
+          _hashed_password: '$2a$10$8/wZJyEuiEaobBBqzTG.jeY.XSFJd0rzaN//ososvEI4yLqI.4aie',
           _auth_data_facebook: null,
         },
         {}
@@ -2810,7 +2910,8 @@ describe('Parse.User testing', () => {
       });
   });
 
-  it('should send email when upgrading from anon', done => {
+  it('should send email when upgrading from anon', async done => {
+    await reconfigureServer();
     let emailCalled = false;
     let emailOptions;
     const emailAdapter = {
@@ -2917,9 +3018,7 @@ describe('Parse.User testing', () => {
         expect(emailCalled).toBeTruthy();
         expect(emailOptions).toBeDefined();
         expect(err.status).toBe(400);
-        expect(err.text).toMatch(
-          '{"code":125,"error":"you must provide a valid email string"}'
-        );
+        expect(err.text).toMatch('{"code":125,"error":"you must provide a valid email string"}');
         done();
       });
   });
@@ -3165,10 +3264,7 @@ describe('Parse.User testing', () => {
     user
       .signUp()
       .then(() => {
-        return Parse.User.current()
-          .relation('relation')
-          .query()
-          .find();
+        return Parse.User.current().relation('relation').query().find();
       })
       .then(res => {
         expect(res.length).toBe(0);
@@ -3204,18 +3300,14 @@ describe('Parse.User testing', () => {
         return user.signUp();
       })
       .then(() => {
-        return Parse.User.current()
-          .set('emailVerified', true)
-          .save();
+        return Parse.User.current().set('emailVerified', true).save();
       })
       .then(() => {
         fail('Should not be able to update emailVerified');
         done();
       })
       .catch(err => {
-        expect(err.message).toBe(
-          "Clients aren't allowed to manually update email verification."
-        );
+        expect(err.message).toBe("Clients aren't allowed to manually update email verification.");
         done();
       });
   });
@@ -3333,8 +3425,7 @@ describe('Parse.User testing', () => {
       })
       .then(() =>
         request({
-          url:
-            'http://localhost:8378/1/login?email=test@email.com&username=hello&password=world',
+          url: 'http://localhost:8378/1/login?email=test@email.com&username=hello&password=world',
           headers: {
             'X-Parse-Application-Id': Parse.applicationId,
             'X-Parse-REST-API-Key': 'rest',
@@ -3377,9 +3468,7 @@ describe('Parse.User testing', () => {
         return user.signUp();
       })
       .then(() => {
-        return Parse.User.current()
-          .set('_email_verify_token', 'bad')
-          .save();
+        return Parse.User.current().set('_email_verify_token', 'bad').save();
       })
       .then(() => {
         fail('Should not be able to update email verification token');
@@ -3439,9 +3528,7 @@ describe('Parse.User testing', () => {
         done();
       });
     });
-  }).pend(
-    'this test fails.  See: https://github.com/parse-community/parse-server/issues/5097'
-  );
+  }).pend('this test fails.  See: https://github.com/parse-community/parse-server/issues/5097');
 
   it('should be able to update user with authData passed', done => {
     let objectId;
@@ -3814,6 +3901,7 @@ describe('Parse.User testing', () => {
   });
 
   it('should throw OBJECT_NOT_FOUND instead of SESSION_MISSING when using masterKey', async () => {
+    await reconfigureServer();
     // create a fake user (just so we simulate an object not found)
     const non_existent_user = Parse.User.createWithoutData('fake_id');
     try {
@@ -3843,51 +3931,44 @@ describe('Parse.User testing', () => {
   });
 
   describe('issue #4897', () => {
-    it_only_db('mongo')(
-      'should be able to login with a legacy user (no ACL)',
-      async () => {
-        // This issue is a side effect of the locked users and legacy users which don't have ACL's
-        // In this scenario, a legacy user wasn't be able to login as there's no ACL on it
-        const database = Config.get(Parse.applicationId).database;
-        const collection = await database.adapter._adaptiveCollection('_User');
-        await collection.insertOne({
-          _id: 'ABCDEF1234',
-          name: '<some_name>',
-          email: '<some_email>',
-          username: '<some_username>',
-          _hashed_password: '<some_password>',
-          _auth_data_facebook: {
-            id: '8675309',
-            access_token: 'jenny',
-          },
-          sessionToken: '<some_session_token>',
-        });
-        const provider = getMockFacebookProvider();
-        Parse.User._registerAuthenticationProvider(provider);
-        const model = await Parse.User._logInWith('facebook', {});
-        expect(model.id).toBe('ABCDEF1234');
-        ok(model instanceof Parse.User, 'Model should be a Parse.User');
-        strictEqual(Parse.User.current(), model);
-        ok(model.extended(), 'Should have used subclass.');
-        strictEqual(provider.authData.id, provider.synchronizedUserId);
-        strictEqual(
-          provider.authData.access_token,
-          provider.synchronizedAuthToken
-        );
-        strictEqual(
-          provider.authData.expiration_date,
-          provider.synchronizedExpiration
-        );
-        ok(model._isLinked('facebook'), 'User should be linked to facebook');
-      }
-    );
+    it_only_db('mongo')('should be able to login with a legacy user (no ACL)', async () => {
+      // This issue is a side effect of the locked users and legacy users which don't have ACL's
+      // In this scenario, a legacy user wasn't be able to login as there's no ACL on it
+      await reconfigureServer();
+      const database = Config.get(Parse.applicationId).database;
+      const collection = await database.adapter._adaptiveCollection('_User');
+      await collection.insertOne({
+        _id: 'ABCDEF1234',
+        name: '<some_name>',
+        email: '<some_email>',
+        username: '<some_username>',
+        _hashed_password: '<some_password>',
+        _auth_data_facebook: {
+          id: '8675309',
+          access_token: 'jenny',
+        },
+        sessionToken: '<some_session_token>',
+      });
+      const provider = getMockFacebookProvider();
+      Parse.User._registerAuthenticationProvider(provider);
+      const model = await Parse.User._logInWith('facebook', {});
+      expect(model.id).toBe('ABCDEF1234');
+      ok(model instanceof Parse.User, 'Model should be a Parse.User');
+      strictEqual(Parse.User.current(), model);
+      ok(model.extended(), 'Should have used subclass.');
+      strictEqual(provider.authData.id, provider.synchronizedUserId);
+      strictEqual(provider.authData.access_token, provider.synchronizedAuthToken);
+      strictEqual(provider.authData.expiration_date, provider.synchronizedExpiration);
+      ok(model._isLinked('facebook'), 'User should be linked to facebook');
+    });
   });
 });
 
-describe('Security Advisory GHSA-8w3j-g983-8jh5', function() {
+describe('Security Advisory GHSA-8w3j-g983-8jh5', function () {
   it_only_db('mongo')(
     'should validate credentials first and check if account already linked afterwards ()',
     async done => {
+      await reconfigureServer();
       // Add User to Database with authData
       const database = Config.get(Parse.applicationId).database;
       const collection = await database.adapter._adaptiveCollection('_User');
@@ -3924,4 +4005,158 @@ describe('Security Advisory GHSA-8w3j-g983-8jh5', function() {
       done();
     }
   );
+  it_only_db('mongo')('should ignore authData field', async () => {
+    // Add User to Database with authData
+    await reconfigureServer();
+    const database = Config.get(Parse.applicationId).database;
+    const collection = await database.adapter._adaptiveCollection('_User');
+    await collection.insertOne({
+      _id: '1234ABCDEF',
+      name: '<some_name>',
+      email: '<some_email>',
+      username: '<some_username>',
+      _hashed_password: '<some_password>',
+      _auth_data_custom: {
+        id: 'linkedID',
+      },
+      sessionToken: '<some_session_token>',
+      authData: null, // should ignore
+    });
+    const provider = {
+      getAuthType: () => 'custom',
+      restoreAuthentication: () => true,
+    };
+    Parse.User._registerAuthenticationProvider(provider);
+    const query = new Parse.Query(Parse.User);
+    const user = await query.get('1234ABCDEF', { useMasterKey: true });
+    expect(user.get('authData')).toEqual({ custom: { id: 'linkedID' } });
+  });
+});
+
+describe('login as other user', () => {
+  it('allows creating a session for another user with the master key', async done => {
+    await Parse.User.signUp('some_user', 'some_password');
+    const userId = Parse.User.current().id;
+    await Parse.User.logOut();
+
+    try {
+      const response = await request({
+        method: 'POST',
+        url: 'http://localhost:8378/1/loginAs',
+        headers: {
+          'X-Parse-Application-Id': Parse.applicationId,
+          'X-Parse-REST-API-Key': 'rest',
+          'X-Parse-Master-Key': 'test',
+        },
+        body: {
+          userId,
+        },
+      });
+
+      expect(response.data.sessionToken).toBeDefined();
+    } catch (err) {
+      fail(`no request should fail: ${JSON.stringify(err)}`);
+      done();
+    }
+
+    const sessionsQuery = new Parse.Query(Parse.Session);
+    const sessionsAfterRequest = await sessionsQuery.find({ useMasterKey: true });
+    expect(sessionsAfterRequest.length).toBe(1);
+
+    done();
+  });
+
+  it('rejects creating a session for another user if the user does not exist', async done => {
+    try {
+      await request({
+        method: 'POST',
+        url: 'http://localhost:8378/1/loginAs',
+        headers: {
+          'X-Parse-Application-Id': Parse.applicationId,
+          'X-Parse-REST-API-Key': 'rest',
+          'X-Parse-Master-Key': 'test',
+        },
+        body: {
+          userId: 'bogus-user',
+        },
+      });
+
+      fail('Request should fail without a valid user ID');
+      done();
+    } catch (err) {
+      expect(err.data.code).toBe(Parse.Error.OBJECT_NOT_FOUND);
+      expect(err.data.error).toBe('user not found');
+    }
+
+    const sessionsQuery = new Parse.Query(Parse.Session);
+    const sessionsAfterRequest = await sessionsQuery.find({ useMasterKey: true });
+    expect(sessionsAfterRequest.length).toBe(0);
+
+    done();
+  });
+
+  it('rejects creating a session for another user with invalid parameters', async done => {
+    const invalidUserIds = [undefined, null, ''];
+
+    for (const invalidUserId of invalidUserIds) {
+      try {
+        await request({
+          method: 'POST',
+          url: 'http://localhost:8378/1/loginAs',
+          headers: {
+            'X-Parse-Application-Id': Parse.applicationId,
+            'X-Parse-REST-API-Key': 'rest',
+            'X-Parse-Master-Key': 'test',
+          },
+          body: {
+            userId: invalidUserId,
+          },
+        });
+
+        fail('Request should fail without a valid user ID');
+        done();
+      } catch (err) {
+        expect(err.data.code).toBe(Parse.Error.INVALID_VALUE);
+        expect(err.data.error).toBe('userId must not be empty, null, or undefined');
+      }
+
+      const sessionsQuery = new Parse.Query(Parse.Session);
+      const sessionsAfterRequest = await sessionsQuery.find({ useMasterKey: true });
+      expect(sessionsAfterRequest.length).toBe(0);
+    }
+
+    done();
+  });
+
+  it('rejects creating a session for another user without the master key', async done => {
+    await Parse.User.signUp('some_user', 'some_password');
+    const userId = Parse.User.current().id;
+    await Parse.User.logOut();
+
+    try {
+      await request({
+        method: 'POST',
+        url: 'http://localhost:8378/1/loginAs',
+        headers: {
+          'X-Parse-Application-Id': Parse.applicationId,
+          'X-Parse-REST-API-Key': 'rest',
+        },
+        body: {
+          userId,
+        },
+      });
+
+      fail('Request should fail without the master key');
+      done();
+    } catch (err) {
+      expect(err.data.code).toBe(Parse.Error.OPERATION_FORBIDDEN);
+      expect(err.data.error).toBe('master key is required');
+    }
+
+    const sessionsQuery = new Parse.Query(Parse.Session);
+    const sessionsAfterRequest = await sessionsQuery.find({ useMasterKey: true });
+    expect(sessionsAfterRequest.length).toBe(0);
+
+    done();
+  });
 });

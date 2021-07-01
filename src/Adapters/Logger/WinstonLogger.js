@@ -13,37 +13,37 @@ function configureTransports(options) {
     const silent = options.silent;
     delete options.silent;
 
-    if (!_.isNil(options.dirname)) {
-      const parseServer = new DailyRotateFile(
-        Object.assign(
-          {
-            filename: 'parse-server.info',
-            json: true,
-            format: format.combine(format.timestamp(), format.splat(), format.json()),
-          },
-          options
-        )
-      );
-      parseServer.name = 'parse-server';
-      transports.push(parseServer);
+    try {
+      if (!_.isNil(options.dirname)) {
+        const parseServer = new DailyRotateFile(
+          Object.assign(
+            {
+              filename: 'parse-server.info',
+              json: true,
+              format: format.combine(format.timestamp(), format.splat(), format.json()),
+            },
+            options
+          )
+        );
+        parseServer.name = 'parse-server';
+        transports.push(parseServer);
 
-      const parseServerError = new DailyRotateFile(
-        Object.assign(
-          {
-            filename: 'parse-server.err',
-            json: true,
-            format: format.combine(
-              format.timestamp(),
-              format.splat(),
-              format.json()
-            ),
-          },
-          options,
-          { level: 'error' }
-        )
-      );
-      parseServerError.name = 'parse-server-error';
-      transports.push(parseServerError);
+        const parseServerError = new DailyRotateFile(
+          Object.assign(
+            {
+              filename: 'parse-server.err',
+              json: true,
+              format: format.combine(format.timestamp(), format.splat(), format.json()),
+            },
+            options,
+            { level: 'error' }
+          )
+        );
+        parseServerError.name = 'parse-server-error';
+        transports.push(parseServerError);
+      }
+    } catch (e) {
+      /* */
     }
 
     const consoleFormat = options.json ? format.json() : format.simple();
@@ -52,7 +52,7 @@ function configureTransports(options) {
         colorize: true,
         name: 'console',
         silent,
-        format: consoleFormat,
+        format: format.combine(format.splat(), consoleFormat),
       },
       options
     );
@@ -71,6 +71,7 @@ export function configureLogger({
   logLevel = winston.level,
   verbose = defaults.verbose,
   silent = defaults.silent,
+  maxLogFiles,
 } = {}) {
   if (verbose) {
     logLevel = 'verbose';
@@ -92,6 +93,7 @@ export function configureLogger({
   options.dirname = logsFolder;
   options.level = logLevel;
   options.silent = silent;
+  options.maxFiles = maxLogFiles;
 
   if (jsonLogs) {
     options.json = true;
@@ -110,9 +112,7 @@ export function addTransport(transport) {
 
 export function removeTransport(transport) {
   const matchingTransport = logger.transports.find(t1 => {
-    return typeof transport === 'string'
-      ? t1.name === transport
-      : t1 === transport;
+    return typeof transport === 'string' ? t1.name === transport : t1 === transport;
   });
 
   if (matchingTransport) {
